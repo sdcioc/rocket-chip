@@ -64,6 +64,8 @@ def dependOnChisel(prj: Project) = {
 
 lazy val hardfloat  = dependOnChisel(project).settings(commonSettings)
   .settings(crossScalaVersions := Seq("2.12.4"))
+lazy val posit  = dependOnChisel(project).settings(commonSettings)
+  .settings(crossScalaVersions := Seq("2.12.4"))
 lazy val `rocket-macros` = (project in file("macros")).settings(commonSettings)
 lazy val rocketchip = dependOnChisel(project in file("."))
   .settings(commonSettings, chipSettings)
@@ -76,7 +78,7 @@ val setMake = NotSpace ~ ( Space ~> NotSpace )
 
 lazy val chipSettings = Seq(
   addons := {
-    val a = sys.env.getOrElse("ROCKETCHIP_ADDONS", "")
+    val a = sys.env.getOrElse("ROCKETCHIP_ADDONS", "posit")
     println(s"Using addons: $a")
     a.split(" ")
   },
