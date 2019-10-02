@@ -481,10 +481,10 @@ class FPToInt_posit(val size: Int, val exponent_max_size: Int) (implicit p: Para
   posit_eq.io.i_bits_2 := in.in2
 
   val tag = !in.singleOut // TODO typeTag
-  val store = in.in1(size-1,0)
+  val store = Cat(Fill(32,0.U),in.in1(size-1,0))
   val toint = Wire(init = store)
   val intType = Wire(init = tag)
-  io.out.bits.store := store
+  io.out.bits.store := (floatTypes.map(t => Fill(maxType.ieeeWidth / t.ieeeWidth, store(t.ieeeWidth - 1, 0))): Seq[UInt])(tag)
   io.out.bits.toint := toint
   io.out.bits.exc := Bits(0)
 
