@@ -475,13 +475,13 @@ class FPToInt_posit(val size: Int, val exponent_max_size: Int) (implicit p: Para
 
   val posit_lt = Module(new posit.PositL(exponent_max_size, size))
   val posit_eq = Module(new posit.PositE(exponent_max_size, size))
-  posit_lt.io.i_bits_1 := in.in1
-  posit_lt.io.i_bits_2 := in.in2
-  posit_eq.io.i_bits_1 := in.in1
-  posit_eq.io.i_bits_2 := in.in2
+  posit_lt.io.i_bits_1 := in.in1(size-1,0)
+  posit_lt.io.i_bits_2 := in.in2(size-1,0)
+  posit_eq.io.i_bits_1 := in.in1(size-1,0)
+  posit_eq.io.i_bits_2 := in.in2(size-1,0)
 
   val tag = !in.singleOut // TODO typeTag
-  val store = Cat(Fill(32,0.U),in.in1(size-1,0))
+  val store = Cat(Fill(64-size,0.U),in.in1(size-1,0))
   val toint = Wire(init = store)
   val intType = Wire(init = tag)
   io.out.bits.store := (floatTypes.map(t => Fill(maxType.ieeeWidth / t.ieeeWidth, store(t.ieeeWidth - 1, 0))): Seq[UInt])(tag)
@@ -585,12 +585,13 @@ class IntToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
   }
 
   val posit_conv = Module(new posit.PositIntPosit(exponent_max_size, size))
-  posit_conv.io.i_bits := intValue
+  //TODO wrong now
+  posit_conv.io.i_bits := intValue(size-1,0)
   
 
 
   when (in.bits.wflags) { // fcvt
-    mux.data := posit_conv.io.o_bits
+    mux.data := Cat(Fill(32-size,0.U),posit_conv.io.o_bits)
   }
 
   io.out <> Pipe(in.valid, mux, latency-1)
@@ -679,7 +680,7 @@ class FPToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)(
 
 
 
-  val fsgnj = Mux(in.bits.rm(1), posit_sgnjx.io.o_bits, Mux(in.bits.rm(0), posit_sgnjn.io.o_bits, posit_sgnj.io.o_bits))
+  val fsgnj = Cat(Fill(32-size,0.U),Mux(in.bits.rm(1), posit_sgnjx.io.o_bits, Mux(in.bits.rm(0), posit_sgnjn.io.o_bits, posit_sgnj.io.o_bits)))
 
 
   val fsgnjMux = Wire(new FPResult)
@@ -689,14 +690,14 @@ class FPToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)(
 
   val posit_min = Module(new posit.PositMin(exponent_max_size, size))
   val posit_max = Module(new posit.PositMax(exponent_max_size, size))
-  posit_min.io.i_bits_1 := in.bits.in1
-  posit_min.io.i_bits_2 := in.bits.in2
-  posit_max.io.i_bits_1 := in.bits.in1
-  posit_max.io.i_bits_2 := in.bits.in2
+  posit_min.io.i_bits_1 := in.bits.in1(size-1,0)
+  posit_min.io.i_bits_2 := in.bits.in2(size-1,0)
+  posit_max.io.i_bits_1 := in.bits.in1(size-1,0)
+  posit_max.io.i_bits_2 := in.bits.in2(size-1,0)
 
   when (in.bits.wflags) { // fmin/fmax
     fsgnjMux.exc := 0.U
-    fsgnjMux.data := Mux(in.bits.rm(0), posit_max.io.o_bits, posit_min.io.o_bits)
+    fsgnjMux.data := Cat(Fill(32-size,0.U),Mux(in.bits.rm(0), posit_max.io.o_bits, posit_min.io.o_bits))
   }
 
   val inTag = !in.bits.singleIn // TODO typeTag
@@ -952,12 +953,12 @@ class FPUFMAPipe_posit(val latency: Int, val size: Int, val exponent_max_size: I
   fma.io.op := in.fmaCmd
   fma.io.roundingMode := in.rm
   fma.io.detectTininess := hardfloat.consts.tininess_afterRounding
-  fma.io.a := in.in1
-  fma.io.b := in.in2
-  fma.io.c := in.in3
+  fma.io.a := in.in1(size-1,0)
+  fma.io.b := in.in2(size-1,0)
+  fma.io.c := in.in3(size-1,0)
 
   val res = Wire(new FPResult)
-  res.data := fma.io.out
+  res.data := Cat(Fill(32-size,0.U),fma.io.out)
   res.exc := fma.io.exceptionFlags
 
   io.out := Pipe(fma.io.validout, res, (latency-3) max 0)
@@ -1400,11 +1401,11 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     req
   }
 
-  val sfma = Module(new FPUFMAPipe_posit(cfg.sfmaLatency, 32, 3))
+  val sfma = Module(new FPUFMAPipe_posit(cfg.sfmaLatency, 16, 2))
   sfma.io.in.valid := req_valid && ex_ctrl.fma && ex_ctrl.singleOut
   sfma.io.in.bits := fuInput(None)
 
-  val fpiu = Module(new FPToInt_posit(32, 3))
+  val fpiu = Module(new FPToInt_posit(16, 2))
   fpiu.io.in.valid := req_valid && (ex_ctrl.toint || ex_ctrl.div || ex_ctrl.sqrt || (ex_ctrl.fastpipe && ex_ctrl.wflags))
   fpiu.io.in.bits := fuInput(None)
   io.store_data := fpiu.io.out.bits.store
@@ -1414,12 +1415,12 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     io.cp_resp.valid := Bool(true)
   }
 
-  val ifpu = Module(new IntToFP_posit(2, 32, 3))
+  val ifpu = Module(new IntToFP_posit(2, 16, 2))
   ifpu.io.in.valid := req_valid && ex_ctrl.fromint
   ifpu.io.in.bits := fpiu.io.in.bits
   ifpu.io.in.bits.in1 := Mux(ex_cp_valid, io.cp_req.bits.in1, io.fromint_data)
 
-  val fpmu = Module(new FPToFP_posit(2, 32, 3))
+  val fpmu = Module(new FPToFP_posit(2, 16, 2))
   fpmu.io.in.valid := req_valid && ex_ctrl.fastpipe
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
@@ -1438,7 +1439,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     Pipe(ifpu, ifpu.latency, (c: FPUCtrlSigs) => c.fromint, ifpu.io.out.bits),
     Pipe(sfma, sfma.latency, (c: FPUCtrlSigs) => c.fma && c.singleOut, sfma.io.out.bits)) ++
     (fLen > 32).option({
-          val dfma = Module(new FPUFMAPipe_posit(cfg.dfmaLatency, 32, 3))
+          val dfma = Module(new FPUFMAPipe_posit(cfg.dfmaLatency, 16, 2))
           dfma.io.in.valid := req_valid && ex_ctrl.fma && !ex_ctrl.singleOut
           dfma.io.in.bits := fuInput(None)
           Pipe(dfma, dfma.latency, (c: FPUCtrlSigs) => c.fma && !c.singleOut, dfma.io.out.bits)
@@ -1528,7 +1529,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
     for (t <- floatTypes) {
       val tag = !mem_ctrl.singleOut // TODO typeTag
-      val divSqrt = Module(new DivSqrt_posit(20, 32, 3))
+      val divSqrt = Module(new DivSqrt_posit(20, 16, 2))
       divSqrt.io.inValid := mem_reg_valid && (mem_ctrl.div || mem_ctrl.sqrt) && !divSqrt_inFlight
       divSqrt.io.sqrtOp := mem_ctrl.sqrt
       divSqrt.io.a := fpiu.io.out.bits.in.in1
@@ -1543,7 +1544,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
       when (divSqrt.io.outValid_div || divSqrt.io.outValid_sqrt) {
         divSqrt_wen := !divSqrt_killed
-        divSqrt_wdata := divSqrt.io.out
+        divSqrt_wdata := Cat(Fill(16,0.U),divSqrt.io.out)
         divSqrt_flags := divSqrt.io.exceptionFlags
         divSqrt_typeTag := typeTag(t)
       }
