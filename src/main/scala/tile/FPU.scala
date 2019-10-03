@@ -1401,11 +1401,11 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     req
   }
 
-  val sfma = Module(new FPUFMAPipe_posit(cfg.sfmaLatency, 16, 2))
+  val sfma = Module(new FPUFMAPipe_posit(cfg.sfmaLatency, 8, 1))
   sfma.io.in.valid := req_valid && ex_ctrl.fma && ex_ctrl.singleOut
   sfma.io.in.bits := fuInput(None)
 
-  val fpiu = Module(new FPToInt_posit(16, 2))
+  val fpiu = Module(new FPToInt_posit(8, 1))
   fpiu.io.in.valid := req_valid && (ex_ctrl.toint || ex_ctrl.div || ex_ctrl.sqrt || (ex_ctrl.fastpipe && ex_ctrl.wflags))
   fpiu.io.in.bits := fuInput(None)
   io.store_data := fpiu.io.out.bits.store
@@ -1415,12 +1415,12 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     io.cp_resp.valid := Bool(true)
   }
 
-  val ifpu = Module(new IntToFP_posit(2, 16, 2))
+  val ifpu = Module(new IntToFP_posit(2, 8, 1))
   ifpu.io.in.valid := req_valid && ex_ctrl.fromint
   ifpu.io.in.bits := fpiu.io.in.bits
   ifpu.io.in.bits.in1 := Mux(ex_cp_valid, io.cp_req.bits.in1, io.fromint_data)
 
-  val fpmu = Module(new FPToFP_posit(2, 16, 2))
+  val fpmu = Module(new FPToFP_posit(2, 8, 1))
   fpmu.io.in.valid := req_valid && ex_ctrl.fastpipe
   fpmu.io.in.bits := fpiu.io.in.bits
   fpmu.io.lt := fpiu.io.out.bits.lt
@@ -1439,7 +1439,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
     Pipe(ifpu, ifpu.latency, (c: FPUCtrlSigs) => c.fromint, ifpu.io.out.bits),
     Pipe(sfma, sfma.latency, (c: FPUCtrlSigs) => c.fma && c.singleOut, sfma.io.out.bits)) ++
     (fLen > 32).option({
-          val dfma = Module(new FPUFMAPipe_posit(cfg.dfmaLatency, 16, 2))
+          val dfma = Module(new FPUFMAPipe_posit(cfg.dfmaLatency, 8, 1))
           dfma.io.in.valid := req_valid && ex_ctrl.fma && !ex_ctrl.singleOut
           dfma.io.in.bits := fuInput(None)
           Pipe(dfma, dfma.latency, (c: FPUCtrlSigs) => c.fma && !c.singleOut, dfma.io.out.bits)
@@ -1529,7 +1529,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
     for (t <- floatTypes) {
       val tag = !mem_ctrl.singleOut // TODO typeTag
-      val divSqrt = Module(new DivSqrt_posit(20, 16, 2))
+      val divSqrt = Module(new DivSqrt_posit(20, 8, 1))
       divSqrt.io.inValid := mem_reg_valid && (mem_ctrl.div || mem_ctrl.sqrt) && !divSqrt_inFlight
       divSqrt.io.sqrtOp := mem_ctrl.sqrt
       divSqrt.io.a := fpiu.io.out.bits.in.in1
@@ -1544,7 +1544,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
       when (divSqrt.io.outValid_div || divSqrt.io.outValid_sqrt) {
         divSqrt_wen := !divSqrt_killed
-        divSqrt_wdata := Cat(Fill(16,0.U),divSqrt.io.out)
+        divSqrt_wdata := Cat(Fill(24,0.U),divSqrt.io.out)
         divSqrt_flags := divSqrt.io.exceptionFlags
         divSqrt_typeTag := typeTag(t)
       }
