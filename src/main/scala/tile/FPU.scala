@@ -1255,6 +1255,7 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
 
     val posit_div = Module(new posit.PositDiv(exponent_max_size, size))
     val posit_sqrt = Module(new posit.PositSqrt(exponent_max_size, size))
+    val cycle_number = RegInit(0.U(size.W))
     posit_div.io.i_bits_1 := io.a(size-1,0)
     posit_div.io.i_bits_2 := io.b(size-1,0)
     posit_sqrt.io.i_bits := io.a(size-1,0)
@@ -1270,9 +1271,18 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
       final_result := posit_div.io.o_bits
     }
     
-
+    when(io.inValid) {
+      cycle_number := 0
+    } .otherwise {
+      cycle_number := cycle_number + 1
+    }
+    val idle = (cycle_number === 0.U)
+    val inReady = (cycle_number <= 1.U)
+    val validout_sqrt = (cycle_number > 1.U)
+    posit_sqrt.io.i_ready := inReady
+    
     val valid_stage0 = Wire(Bool())
-    io.inReady := ~valid_stage0
+    io.inReady := ~valid_stage0 | inReady
   
     val postmul_regs = if(latency>0) 1 else 0
     //posit_add.io.i_bits_1 := Pipe(io.validin, mul_result, postmul_regs).bits
@@ -1291,8 +1301,7 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     validout                                  := Pipe(valid_stage0, false.B, round_regs).valid
 
     io.outValid_div  := validout && !io.sqrtOp
-    io.outValid_sqrt := validout && io.sqrtOp && posit_sqrt.io.o_ready
-
+    io.outValid_sqrt := (validout || validout_sqrt) && io.sqrtOp && posit_sqrt.io.o_ready
     
     io.out := Cat(0.U(1.W), final_result)
     io.exceptionFlags := 0.U
@@ -1528,7 +1537,7 @@ class FPU(cfg: FPUParams)(implicit p: Parameters) extends FPUModule()(p) {
 
     for (t <- floatTypes) {
       val tag = !mem_ctrl.singleOut // TODO typeTag
-      val divSqrt = Module(new DivSqrt_posit(20, 32, 3))
+      val divSqrt = Module(new DivSqrt_posit(2, 32, 3))
       divSqrt.io.inValid := mem_reg_valid && (mem_ctrl.div || mem_ctrl.sqrt) && !divSqrt_inFlight
       divSqrt.io.sqrtOp := mem_ctrl.sqrt
       divSqrt.io.a := fpiu.io.out.bits.in.in1
