@@ -30,8 +30,8 @@ import FPConstants._
 
 object POSITConstants
 {
-  val posit_size = 32
-  val posit_exponent_size = 3
+  val posit_size = 8
+  val posit_exponent_size = 1
   val latency = 2
 }
 import POSITConstants._
@@ -482,8 +482,8 @@ class FPToInt_posit(val size: Int, val exponent_max_size: Int) (implicit p: Para
   val in = RegEnable(io.in.bits, io.in.valid)
   val valid = Reg(next=io.in.valid)
 
-  val posit_lt = Module(new posit.PositL(exponent_max_size, size))
-  val posit_eq = Module(new posit.PositE(exponent_max_size, size))
+  val posit_lt = Module(new posit.PositL(size))
+  val posit_eq = Module(new posit.PositE(size))
   posit_lt.io.i_bits_1 := in.in1
   posit_lt.io.i_bits_2 := in.in2
   posit_eq.io.i_bits_1 := in.in1
@@ -516,11 +516,12 @@ class FPToInt_posit(val size: Int, val exponent_max_size: Int) (implicit p: Para
     intType := 0
 
     when (!in.ren2) { // fcvt
-      val conv = Module(new posit.PositPositInt(exponent_max_size, size))
+      val conv = Module(new posit.PositPositToIntTester(size, size))
       conv.io.i_bits := store
+      conv.io.i_es := exponent_max_size.U
       //Devazut asta  TODO: in functie de sign
       //conv.io.signedOut := ~in.typ(0)
-      toint := conv.io.o_bits
+      toint := conv.io.o_integer
     }
   }
 
@@ -600,9 +601,9 @@ class IntToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     res.asUInt
   }
 
-  val posit_conv = Module(new posit.PositIntPosit(exponent_max_size, size))
+  val posit_conv = Module(new posit.PositIntToPositTester(size, size))
   posit_conv.io.i_bits := intValue
-  
+  posit_conv.io.i_es := exponent_max_size.U
 
 
   when (in.bits.wflags) { // fcvt
@@ -688,18 +689,15 @@ class FPToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)(
   val in = Pipe(io.in)
 
 
-  val posit_sgnj = Module(new posit.PositSGNJ(exponent_max_size, size))
-  val posit_sgnjn = Module(new posit.PositSGNJN(exponent_max_size, size))
-  val posit_sgnjx = Module(new posit.PositSGNJX(exponent_max_size, size))
+  val posit_sgnj = Module(new posit.PositSGNJ(size))
+
   posit_sgnj.io.i_bits_1 := in.bits.in1
   posit_sgnj.io.i_bits_2 := in.bits.in2
-  posit_sgnjn.io.i_bits_1 := in.bits.in1
-  posit_sgnjn.io.i_bits_2 := in.bits.in2
-  posit_sgnjx.io.i_bits_1 := in.bits.in1
-  posit_sgnjx.io.i_bits_2 := in.bits.in2
+  posit_sgnj.io.i_op := in.bits.rm(1, 0)
 
 
-  val fsgnj = Cat(Fill(64-size,0.U),Mux(in.bits.rm(1), posit_sgnjx.io.o_bits, Mux(in.bits.rm(0), posit_sgnjn.io.o_bits, posit_sgnj.io.o_bits)))(31, 0)
+
+  val fsgnj = Cat(Fill(64-size,0.U), posit_sgnj.io.o_bits)(31, 0)
   /*
   if((32-size) > 0) {
     fsgnj := Cat(Fill(32-size,0.U),Mux(in.bits.rm(1), posit_sgnjx.io.o_bits, Mux(in.bits.rm(0), posit_sgnjn.io.o_bits, posit_sgnj.io.o_bits)))
@@ -713,20 +711,17 @@ class FPToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)(
   fsgnjMux.exc := UInt(0)
   fsgnjMux.data := fsgnj
 
-
-  val posit_min = Module(new posit.PositMin(exponent_max_size, size))
-  val posit_max = Module(new posit.PositMax(exponent_max_size, size))
-  posit_min.io.i_bits_1 := in.bits.in1
-  posit_min.io.i_bits_2 := in.bits.in2
-  posit_max.io.i_bits_1 := in.bits.in1
-  posit_max.io.i_bits_2 := in.bits.in2
+  val posit_min_max = Module(new posit.PositMinMax(size))
+  posit_min_max.io.i_bits_1 := in.bits.in1
+  posit_min_max.io.i_bits_2 := in.bits.in2
+  posit_min_max.io.i_op := in.bits.rm(0)
 
   when (in.bits.wflags) { // fmin/fmax
     fsgnjMux.exc := 0.U
     if((32-size) > 0) {
-      fsgnjMux.data := Cat(Fill(32-size,0.U),Mux(in.bits.rm(0), posit_max.io.o_bits, posit_min.io.o_bits))
+      fsgnjMux.data := Cat(Fill(32-size,0.U),posit_min_max.io.o_bits)
     } else {
-      fsgnjMux.data := Mux(in.bits.rm(0), posit_max.io.o_bits, posit_min.io.o_bits)
+      fsgnjMux.data := posit_min_max.io.o_bits
     }
     
   }
@@ -886,53 +881,47 @@ class MulAddRecFNPipe_posit(val latency: Int, val size: Int, val exponent_max_si
         val validout = Bool(OUTPUT)
     }
 
-    val posit_add = Module(new posit.PositAdd(exponent_max_size, size))
-    val posit_sub = Module(new posit.PositSub(exponent_max_size, size))
-    val posit_mul = Module(new posit.PositMul(exponent_max_size, size))
-    val b_neg = Wire(UInt(size.W))
-    val c_neg = Wire(UInt(size.W))
-    val posit_2comp_b = Module(new posit.PositTwoComp(exponent_max_size, size))
-    val posit_2comp_c = Module(new posit.PositTwoComp(exponent_max_size, size))
-    posit_2comp_b.io.i_bits := io.b(size-1,0)
-    posit_2comp_c.io.i_bits := io.c(size-1,0)
-    b_neg := posit_2comp_b.io.o_bits 
-    c_neg := posit_2comp_c.io.o_bits
-    val mul_result = Wire(UInt(size.W))
-    val final_result_sub = Wire(UInt(size.W))
-    val final_result_add = Wire(UInt(size.W))
-    //------------------------------------------------------------------------
-    //------------------------------------------------------------------------
-    posit_mul.io.i_bits_1 := io.a(size-1,0)
-    posit_mul.io.i_bits_2 := io.b(size-1,0)
-    when(io.op(1) === 1.U) {
-      posit_mul.io.i_bits_2 := b_neg
-    }
-    mul_result := posit_mul.io.o_bits
-    val mul_sign = Wire(UInt(1.W))
-    val c_sign = Wire(UInt(1.W))
-    val different_sign = Wire(UInt(1.W))
-    mul_sign := mul_result(size-1)
-    c_sign := io.op(0) ^ io.c(size-1)
-    different_sign := mul_sign ^ c_sign
-    //posit_add.io.i_bits_1 := mul_result
-    //posit_sub.io.i_bits_1 := mul_result
-    posit_add.io.i_bits_2 := 0.U
-    posit_sub.io.i_bits_2 := 0.U
-    when( (different_sign ^ io.op(0)) === 1.U) {
-      posit_add.io.i_bits_2 := c_neg
-      posit_sub.io.i_bits_2 := c_neg
-    } .otherwise {
-      posit_add.io.i_bits_2 := io.c(size-1,0)
-      posit_sub.io.i_bits_2 := io.c(size-1,0)
-    }
 
+
+    val posit_multiply_result =  Module(new posit.Posit(ps))
+
+    val decoder_1 =  Module(new posit.DecodePosit(ps))
+    decoder_1.io.i_bits := io.a(size-1,0)
+    decoder_1.io.i_es := exponent_max_size.U
+    val decoder_2 =  Module(new posit.DecodePosit(ps))
+    decoder_2.io.i_bits := io.b(size-1,0)
+    decoder_2.io.i_es := exponent_max_size.U
+    val decoder_3 =  Module(new posit.DecodePosit(ps))
+    decoder_3.io.i_bits := io.c(size-1,0)
+    decoder_3.io.i_es := exponent_max_size.U
+    val encoder =  Module(new posit.EncodePosit(ps))
+
+
+    
+
+    val posit_multiplier = Module(new posit.PositMultiplier(size))
+    posit_multiplier.io.i_posit_1 := decoder_1.io.o_posit
+    posit_multiplier.io.i_posit_2 := decoder_2.io.o_posit
+    //posit_multiply_result := posit_multiplier.io.o_posit
+    posit_multiply_result.sign := posit_multiplier.io.o_posit.sign ^ io.op(1)
+    posit_multiply_result.special_number := posit_multiplier.io.o_posit.special_number
+    posit_multiply_result.exponent_size := posit_multiplier.io.o_posit.exponent_size
+    posit_multiply_result.exponent := posit_multiplier.io.o_posit.exponent
+    posit_multiply_result.regime := posit_multiplier.io.o_posit.regime
+    posit_multiply_result.fraction_size := posit_multiplier.io.o_posit.fraction_size
+    posit_multiply_result.fraction := posit_multiplier.io.o_posit.fraction
+    posit_multiply_result.b_m := posit_multiplier.io.o_posit.b_m
+
+    val posit_adderSubtractor = Module(new posit.PositAdderSubtractor(size))
+    posit_adderSubtractor.io.i_posit_1 := posit_multiply_result
+    posit_adderSubtractor.io.i_posit_2 := decoder_3.io.o_posit
+    posit_adderSubtractor.io.i_op := io.op(0)
+    encoder.io.i_posit := posit_adderSubtractor.io.o_posit
 
 
     val valid_stage0 = Wire(Bool())
   
     val postmul_regs = if(latency>0) 1 else 0
-    posit_add.io.i_bits_1 := Pipe(io.validin, mul_result, postmul_regs).bits
-    posit_sub.io.i_bits_1 := Pipe(io.validin, mul_result, postmul_regs).bits
     //mulAddRecFNToRaw_postMul.io.roundingMode := Pipe(io.validin, io.roundingMode, postmul_regs).bits
     valid_stage0                             := Pipe(io.validin, false.B, postmul_regs).valid
     
@@ -941,17 +930,11 @@ class MulAddRecFNPipe_posit(val latency: Int, val size: Int, val exponent_max_si
 
     val round_regs = if(latency==2) 1 else 0
     //roundRawFNToRecFN.io.invalidExc         := Pipe(valid_stage0, mulAddRecFNToRaw_postMul.io.invalidExc, round_regs).bits
-    final_result_sub                        := Pipe(valid_stage0, posit_sub.io.o_bits, round_regs).bits
-    final_result_add                        := Pipe(valid_stage0, posit_add.io.o_bits, round_regs).bits
+
     io.validout                             := Pipe(valid_stage0, false.B, round_regs).valid
 
     
-    io.out := 0.U
-    when (different_sign === 1.U) {
-      io.out := Cat(0.U(1.W), final_result_sub)
-    } .otherwise {
-      io.out := Cat(0.U(1.W), final_result_add)
-    }
+    io.out := encoder.io.o_bits
     io.exceptionFlags := 0.U
 }
 
@@ -1291,12 +1274,18 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
         val exceptionFlags = Bits(OUTPUT, 5)
     }
 
-    val posit_div = Module(new posit.PositDiv(exponent_max_size, size))
-    val posit_sqrt = Module(new posit.PositSqrt(exponent_max_size, size))
-    val cycle_number = RegInit(0.U(size.W))
+
+
+    val posit_div = Module(new posit.PositDividerTester(size))
     posit_div.io.i_bits_1 := io.a(size-1,0)
     posit_div.io.i_bits_2 := io.b(size-1,0)
+    posit_div.io.i_es := exponent_max_size.U
+    val posit_sqrt = Module(new posit.PositSQRTTester(size))
     posit_sqrt.io.i_bits := io.a(size-1,0)
+    posit_sqrt.io.i_es := exponent_max_size.U
+
+
+    val cycle_number = RegInit(0.U(size.W))
     //io.outValid_sqrt := 0.U
     //io.outValid_div := 0.U
     io.exceptionFlags := 0.U
@@ -1323,8 +1312,6 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     io.inReady := ~valid_stage0 | inReady
   
     val postmul_regs = if(latency>0) 1 else 0
-    //posit_add.io.i_bits_1 := Pipe(io.validin, mul_result, postmul_regs).bits
-    //posit_sub.io.i_bits_1 := Pipe(io.validin, mul_result, postmul_regs).bits
     //mulAddRecFNToRaw_postMul.io.roundingMode := Pipe(io.validin, io.roundingMode, postmul_regs).bits
     valid_stage0                             := Pipe(io.inValid, false.B, postmul_regs).valid
     
@@ -1334,8 +1321,6 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     val validout = Wire(Bool())
     val round_regs = if(latency>(log2Ceil(size)+2)) 1 else 0
     //roundRawFNToRecFN.io.invalidExc         := Pipe(valid_stage0, mulAddRecFNToRaw_postMul.io.invalidExc, round_regs).bits
-    //final_result_sub                        := Pipe(valid_stage0, posit_sub.io.o_bits, round_regs).bits
-    //final_result_add                        := Pipe(valid_stage0, posit_add.io.o_bits, round_regs).bits
     validout                                  := Pipe(valid_stage0, false.B, round_regs).valid
 
     io.outValid_div  := validout && !io.sqrtOp
