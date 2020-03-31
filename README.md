@@ -662,6 +662,18 @@ Now we can proceed as with Spike, debugging works in a similar way:
 
 Further information about GDB debugging is available [here](https://sourceware.org/gdb/onlinedocs/gdb/) and [here](https://sourceware.org/gdb/onlinedocs/gdb/Remote-Debugging.html#Remote-Debugging).
 
+
+
+### 6) Testingg posit
+```bash
+CONFIG=DefaultConfigRBB make debug
+make APP=E // in caial
+./emulator-freechips.rocketchip.system-DefaultConfigRBB-debug +jtag_rbb_enable=1 -c -r 55555 ../../caial/E.riscv
+./openocd -f ../../dumi/cemulator.cfg //from riscv-openocd/src
+riscv64-unknown-elf-gdb ./E.riscv -x command_E.gdb 
+```
+
+
 ## <a name="contributors"></a> Contributors
 
 Can be found [here](https://github.com/ucb-bar/rocket-chip/graphs/contributors).

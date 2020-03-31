@@ -30,8 +30,8 @@ import FPConstants._
 
 object POSITConstants
 {
-  val posit_size = 8
-  val posit_exponent_size = 1
+  val posit_size = 32
+  val posit_exponent_size = 3
   val latency = 2
 }
 import POSITConstants._
@@ -517,7 +517,7 @@ class FPToInt_posit(val size: Int, val exponent_max_size: Int) (implicit p: Para
 
     when (!in.ren2) { // fcvt
       val conv = Module(new posit.PositPositToIntTester(size, size))
-      conv.io.i_bits := store
+      conv.io.i_posit := store
       conv.io.i_es := exponent_max_size.U
       //Devazut asta  TODO: in functie de sign
       //conv.io.signedOut := ~in.typ(0)
@@ -602,16 +602,16 @@ class IntToFP_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
   }
 
   val posit_conv = Module(new posit.PositIntToPositTester(size, size))
-  posit_conv.io.i_bits := intValue
+  posit_conv.io.i_integer := intValue
   posit_conv.io.i_es := exponent_max_size.U
 
 
   when (in.bits.wflags) { // fcvt
     //mux.data := Cat(Fill(32 - size,0.U),posit_conv.io.o_bits)
     if((32-size) > 0) {
-      mux.data := Cat(Fill(32-size,0.U),posit_conv.io.o_bits)
+      mux.data := Cat(Fill(32-size,0.U),posit_conv.io.o_posit)
     } else {
-      mux.data := posit_conv.io.o_bits
+      mux.data := posit_conv.io.o_posit
     }
   }
 
@@ -883,18 +883,18 @@ class MulAddRecFNPipe_posit(val latency: Int, val size: Int, val exponent_max_si
 
 
 
-    val posit_multiply_result =  Module(new posit.Posit(ps))
+    val posit_multiply_result =  Wire(new posit.Posit(size))
 
-    val decoder_1 =  Module(new posit.DecodePosit(ps))
+    val decoder_1 =  Module(new posit.DecodePosit(size))
     decoder_1.io.i_bits := io.a(size-1,0)
     decoder_1.io.i_es := exponent_max_size.U
-    val decoder_2 =  Module(new posit.DecodePosit(ps))
+    val decoder_2 =  Module(new posit.DecodePosit(size))
     decoder_2.io.i_bits := io.b(size-1,0)
     decoder_2.io.i_es := exponent_max_size.U
-    val decoder_3 =  Module(new posit.DecodePosit(ps))
+    val decoder_3 =  Module(new posit.DecodePosit(size))
     decoder_3.io.i_bits := io.c(size-1,0)
     decoder_3.io.i_es := exponent_max_size.U
-    val encoder =  Module(new posit.EncodePosit(ps))
+    val encoder =  Module(new posit.EncodePosit(size))
 
 
     
@@ -1277,11 +1277,11 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
 
 
     val posit_div = Module(new posit.PositDividerTester(size))
-    posit_div.io.i_bits_1 := io.a(size-1,0)
-    posit_div.io.i_bits_2 := io.b(size-1,0)
+    posit_div.io.i_posit_1 := io.a(size-1,0)
+    posit_div.io.i_posit_2 := io.b(size-1,0)
     posit_div.io.i_es := exponent_max_size.U
     val posit_sqrt = Module(new posit.PositSQRTTester(size))
-    posit_sqrt.io.i_bits := io.a(size-1,0)
+    posit_sqrt.io.i_posit := io.a(size-1,0)
     posit_sqrt.io.i_es := exponent_max_size.U
 
 
@@ -1293,9 +1293,9 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     val final_result = Wire(UInt(size.W))
     final_result := 0.U
     when(io.sqrtOp) {
-      final_result := posit_sqrt.io.o_bits
+      final_result := posit_sqrt.io.o_posit
     } .otherwise {
-      final_result := posit_div.io.o_bits
+      final_result := posit_div.io.o_posit
     }
     
     when(io.inValid) {
