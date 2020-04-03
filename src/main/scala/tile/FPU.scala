@@ -1306,6 +1306,7 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     val idle = (cycle_number === 0.U)
     val inReady = (cycle_number <= 1.U)
     val validout_sqrt = (cycle_number > 1.U)
+    val validout_div = (cycle_number > 1.U)
     posit_sqrt.io.i_ready := inReady
     
     val valid_stage0 = Wire(Bool())
@@ -1323,7 +1324,7 @@ class DivSqrt_posit(val latency: Int, val size: Int, val exponent_max_size: Int)
     //roundRawFNToRecFN.io.invalidExc         := Pipe(valid_stage0, mulAddRecFNToRaw_postMul.io.invalidExc, round_regs).bits
     validout                                  := Pipe(valid_stage0, false.B, round_regs).valid
 
-    io.outValid_div  := validout && !io.sqrtOp
+    io.outValid_div  := (validout || validout_div) && !io.sqrtOp && posit_sqrt.io.o_ready
     io.outValid_sqrt := (validout || validout_sqrt) && io.sqrtOp && posit_sqrt.io.o_ready
     
     io.out := Cat(0.U(1.W), final_result)
